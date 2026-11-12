@@ -110,15 +110,9 @@ class YoursViewModel @Inject constructor(
     val moodAndGenres = MutableStateFlow<List<MoodAndGenres>?>(null)
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (YouTube.cookie != null) {
-                YouTube.library("FEmusic_liked_playlists").completed().onSuccess { page ->
-                    accountPlaylists.value = page.items
-                        .filterIsInstance<PlaylistItem>()
-                        .filterNot { it.id == "SE" }
-                }.onFailure { reportException(it) }
-            }
-        }
+        // Do not automatically display or import the signed-in account's
+        // YouTube Music playlists. The Google connection remains available
+        // to the search client; the library shown here is local.
         viewModelScope.launch(Dispatchers.IO) {
             YouTube.moodAndGenres().onSuccess {
                 moodAndGenres.value = it

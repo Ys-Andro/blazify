@@ -700,9 +700,8 @@ class HomeViewModel @Inject constructor(
                 }.onFailure { reportException(it) }
             }
 
-            if (YouTube.cookie != null) {
-                launch(Dispatchers.IO) { loadAccountPlaylists() }
-            }
+            // Google sign-in remains available for authenticated search.
+            // It must not automatically pull the account's YouTube Music library.
         }
 
         allLocalItems.value = (quickPicks.value.orEmpty() + forgottenFavorites.value.orEmpty() + keepListening.value.orEmpty())
@@ -876,18 +875,6 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadAccountPlaylists() {
-        val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
-        YouTube.library("FEmusic_liked_playlists").completed().onSuccess {
-            accountPlaylists.value = it.items.filterIsInstance<PlaylistItem>()
-                .filterOutNulls()
-                .filterNot { it.id == "SE" }
-                .filterYoutubeShorts(hideYoutubeShorts)
-        }.onFailure {
-            reportException(it)
-        }
-    }
-
     /**
      * Safely filters out null items from a list whose type says non-null
      * but may contain nulls at runtime due to JSON parsing.
@@ -902,7 +889,6 @@ class HomeViewModel @Inject constructor(
         speedDialPlayed()
         forYouPlayed()
         viewModelScope.launch(Dispatchers.IO) {
-            if (YouTube.cookie != null) loadForYouMix()
             // If a chip is selected, reload the chip's content instead of the default home
             val currentChip = selectedChip.value
             if (currentChip != null) {
@@ -996,7 +982,7 @@ class HomeViewModel @Inject constructor(
                             }.onFailure {
                                 reportException(it)
                             }
-                            loadForYouMix()
+                            // Do not load account-personalized YouTube Music content on sign-in.
                         } else {
                             accountName.value = "Guest"
                             accountImageUrl.value = null
@@ -1009,17 +995,7 @@ class HomeViewModel @Inject constructor(
                 }
         }
 
-        // Listen for HideYoutubeShorts preference changes and reload account playlists instantly
-        viewModelScope.launch(Dispatchers.IO) {
-            context.dataStore.data
-                .map { it[HideYoutubeShortsKey] ?: false }
-                .distinctUntilChanged()
-                .collect {
-                    if (YouTube.cookie != null && accountPlaylists.value != null) {
-                        loadAccountPlaylists()
-                    }
-                }
-        }
+
     }
 
     private var isHomeDataLoaded = false

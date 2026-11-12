@@ -6,29 +6,21 @@
 
 package com.blazify.music.viewmodels
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.blazify.innertube.YouTube
 import com.blazify.innertube.models.AlbumItem
 import com.blazify.innertube.models.ArtistItem
 import com.blazify.innertube.models.PlaylistItem
-import com.blazify.innertube.models.filterYoutubeShorts
-import com.blazify.innertube.utils.completed
-import com.blazify.music.constants.HideYoutubeShortsKey
+import com.blazify.innertube.models.AlbumItem
+import com.blazify.innertube.models.ArtistItem
+import com.blazify.innertube.models.PlaylistItem
 import com.blazify.music.db.MusicDatabase
 import com.blazify.music.db.entities.PodcastEntity
-import com.blazify.music.ui.utils.resize
-import com.blazify.music.utils.dataStore
-import com.blazify.music.utils.get
 import com.blazify.music.utils.reportException
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -39,7 +31,6 @@ enum class AccountContentType {
 
 @HiltViewModel
 class AccountViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
     database: MusicDatabase,
 ) : ViewModel() {
     val playlists = MutableStateFlow<List<PlaylistItem>?>(null)
@@ -58,63 +49,15 @@ class AccountViewModel @Inject constructor(
     // Selected content type for chips
     val selectedContentType = MutableStateFlow(AccountContentType.PLAYLISTS)
 
-    private suspend fun loadPlaylists() {
-        val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
-        YouTube.library("FEmusic_liked_playlists").completed().onSuccess {
-            val all = it.items.filterIsInstance<PlaylistItem>()
-            // Extract SE playlist separately for Podcasts tab
-            sePlaylist.value = all.find { it.id == "SE" }
-            playlists.value = all
-                .filterNot { it.id == "SE" }
-                .filterYoutubeShorts(hideYoutubeShorts)
-        }.onFailure {
-            reportException(it)
-        }
-    }
-
     init {
-        viewModelScope.launch {
-            loadPlaylists()
-            YouTube.library("FEmusic_liked_albums").completed().onSuccess {
-                albums.value = it.items.filterIsInstance<AlbumItem>()
-            }.onFailure {
-                reportException(it)
-            }
-            YouTube.library("FEmusic_library_corpus_artists").completed().onSuccess {
-                artists.value = it.items.filterIsInstance<ArtistItem>().map { artist ->
-                    artist.copy(
-                        thumbnail = artist.thumbnail?.resize(544, 544)
-                    )
-                }
-            }.onFailure {
-                reportException(it)
-            }
-        }
+        // Keep the account connection for search, but do not fetch the user's
+        // personal YouTube Music playlists, albums or followed artists here.
         viewModelScope.launch {
             YouTube.newEpisodesPlaylistInfo().onSuccess {
                 rdpnPlaylist.value = it
             }.onFailure {
                 reportException(it)
             }
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            YouTube.libraryPodcastChannels().onSuccess {
-                podcastChannels.value = it.items.filterIsInstance<ArtistItem>()
-            }.onFailure {
-                reportException(it)
-            }
-        }
-
-        // Listen for HideYoutubeShorts preference changes and reload playlists instantly
-        viewModelScope.launch(Dispatchers.IO) {
-            context.dataStore.data
-                .map { it[HideYoutubeShortsKey] ?: false }
-                .distinctUntilChanged()
-                .collect {
-                    if (playlists.value != null) {
-                        loadPlaylists()
-                    }
-                }
         }
     }
 
