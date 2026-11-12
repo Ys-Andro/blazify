@@ -51,6 +51,25 @@ jobs:
           test -f "${platforms_dir}/android-37/android.jar"
           test -d "${ANDROID_HOME}/build-tools/37.0.0"
 
+      # The app's optimized release variant falls back to the Android debug
+      # signing config when no private release keystore is configured.
+      # GitHub-hosted runners do not create ~/.android/debug.keystore for us.
+      - name: Create CI debug keystore for release fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [[ ! -f "$HOME/.android/debug.keystore" ]]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA -keysize 2048 -validity 10000
+          fi
+          test -s "$HOME/.android/debug.keystore"
+
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
