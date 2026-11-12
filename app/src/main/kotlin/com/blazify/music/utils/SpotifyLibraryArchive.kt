@@ -33,13 +33,20 @@ object SpotifyLibraryArchive {
         parse(files)
     }
 
+    /**
+     * Reads the two formats Spotify currently uses in account exports:
+     * YourLibrary.json (saved tracks) and Playlist*.json (playlist entries).
+     * Parsing is public and pure so export samples can be tested without Android storage.
+     */
     fun parse(files: Map<String, String>): List<Collection> {
         val result = mutableListOf<Collection>()
         files.forEach { (fileName, raw) ->
             val root = json.parseToJsonElement(raw)
             if (fileName.equals("YourLibrary.json", true)) {
                 val liked = findTrackObjects(root).mapNotNull { it.toTrack() }
-                if (liked.isNotEmpty()) result += Collection("Liked Songs", liked.distinctBy { it.title to it.artists })
+                if (liked.isNotEmpty()) {
+                    result += Collection("Liked Songs", liked.distinctBy { normalizeKey(it) })
+                }
             } else if (fileName.matches(Regex("Playlist.*\\.json", RegexOption.IGNORE_CASE))) {
                 collectPlaylists(root, result)
             }
@@ -55,7 +62,9 @@ object SpotifyLibraryArchive {
                 val items = element["items"] ?: element["tracks"]
                 if (playlistName != null && items != null) {
                     val tracks = findTrackObjects(items).mapNotNull { it.toTrack() }
-                    if (tracks.isNotEmpty()) output += Collection(playlistName, tracks)
+                    if (tracks.isNotEmpty()) {
+                        output += Collection(playlistName, tracks.distinctBy { normalizeKey(it) })
+                    }
                 } else {
                     element.values.forEach { collectPlaylists(it, output) }
                 }
@@ -71,11 +80,18 @@ object SpotifyLibraryArchive {
                 is JsonArray -> node.forEach(::visit)
                 is JsonObject -> {
                     val nestedTrack = node["track"]
-                    if (nestedTrack is JsonObject) visit(nestedTrack)
-                    else if (node.text("trackName", "track_name", "track") != null &&
-                        node.text("artistName", "artist_name", "artist") != null
-                    ) found += node
-                    else node.values.forEach(::visit)
+                    if (nestedTrack is JsonObject) {
+                        visit(nestedTrack)
+                    } else if (
+                        node.text("trackName", "track_name", "track", "name", "title") != null &&
+                        node.text("artistName", "artist_name", "artist") != null ||
+                        node.text("trackName", "track_name", "track", "name", "title") != null &&
+                        node["artists"] is JsonArray
+                    ) {
+                        found += node
+                    } else {
+                        node.values.forEach(::visit)
+                    }
                 }
                 else -> Unit
             }
@@ -87,11 +103,20 @@ object SpotifyLibraryArchive {
     private fun JsonObject.toTrack(): SpotifyPlaylist.Track? {
         val title = text("trackName", "track_name", "track", "name", "title") ?: return null
         val artists = text("artistName", "artist_name", "artist")
-            ?: (this["artists"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.joinToString(", ")
+            ?: (this["artists"] as? JsonArray)?.mapNotNull { artist ->
+                when (artist) {
+                    is JsonPrimitive -> artist.contentOrNull
+                    is JsonObject -> artist.text("name", "artistName")
+                    else -> null
+                }
+            }?.joinToString(", ")
             ?: ""
         val durationMs = text("duration_ms", "durationMs")?.toLongOrNull() ?: 0L
         return SpotifyPlaylist.Track(title.trim(), artists.trim(), (durationMs / 1000).toInt())
     }
+
+    private fun normalizeKey(track: SpotifyPlaylist.Track): String =
+        track.title.trim().lowercase() + "|" + track.artists.trim().lowercase()
 
     private fun JsonObject.text(vararg keys: String): String? {
         keys.forEach { key ->
