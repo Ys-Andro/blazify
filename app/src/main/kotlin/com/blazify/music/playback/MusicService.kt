@@ -770,7 +770,7 @@ class MusicService :
                 CHANNEL_ID,
                 R.string.music_player,
             ).apply {
-                setSmallIcon(R.drawable.small_icon)
+                setSmallIcon(R.drawable.notification_mark)
             }
 
         setMediaNotificationProvider(
@@ -5339,7 +5339,7 @@ class MusicService :
             .Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.music_player))
             .setContentText("")
-            .setSmallIcon(R.drawable.small_icon)
+            .setSmallIcon(R.drawable.notification_mark)
             .setContentIntent(pending)
             .setOngoing(true)
             .build()
