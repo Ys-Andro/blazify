@@ -104,6 +104,40 @@ object SpotifyImport {
         }
     }
 
+    suspend fun importTracks(
+        name: String,
+        tracks: List<SpotifyPlaylist.Track>,
+        database: MusicDatabase,
+        onProgress: (Progress) -> Unit = {},
+    ): Result<Outcome> {
+        if (tracks.isEmpty()) return Result.failure(IllegalArgumentException("No tracks found"))
+        val found = arrayOfNulls<SongItem>(tracks.size)
+        var done = 0
+        coroutineScope {
+            val limit = Semaphore(AT_ONCE)
+            tracks.mapIndexed { index, track ->
+                async(Dispatchers.IO) {
+                    limit.withPermit {
+                        found[index] = search(track)
+                        val current = synchronized(found) { ++done }
+                        onProgress(Progress(current, tracks.size))
+                    }
+                }
+            }.forEach { it.await() }
+        }
+        val entity = PlaylistEntity(name = name, bookmarkedAt = LocalDateTime.now(), isEditable = true)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                database.insert(entity)
+                found.filterNotNull().forEach { database.insert(it.toMediaMetadata()) }
+                val stored = database.playlistBlocking(entity.id) ?: throw IllegalStateException("playlist vanished")
+                database.addSongToPlaylist(stored, found.filterNotNull().map { it.id })
+                val missing = tracks.filterIndexed { index, _ -> found[index] == null }.map { it.title }
+                Outcome(entity.id, name, tracks.size - missing.size, tracks.size, missing, false)
+            }.onFailure { Timber.tag("SpotifyImport").w(it, "collection import failed") }
+        }
+    }
+
     private suspend fun search(track: SpotifyPlaylist.Track): SongItem? {
         // "Live And Let Die - 2022 Remaster" or "Axel F - From "Beverly Hills Cop" Soundtrack"
         // send the search elsewhere; the plain title and the first artist find the song.

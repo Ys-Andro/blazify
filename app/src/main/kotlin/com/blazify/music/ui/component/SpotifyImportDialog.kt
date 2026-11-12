@@ -1,6 +1,7 @@
 package com.blazify.music.ui.component
 
 import android.content.res.Configuration
+import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.util.lerp
@@ -48,6 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +58,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.blazify.music.LocalDatabase
 import com.blazify.music.R
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.blazify.music.utils.SpotifyLibraryArchive
 import com.blazify.music.utils.SpotifyImport
 import com.blazify.music.utils.SpotifyPlaylist
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +85,7 @@ fun SpotifyImportDialog(
     onImported: (String) -> Unit,
 ) {
     val database = LocalDatabase.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -89,6 +95,45 @@ fun SpotifyImportDialog(
     var total by remember { mutableIntStateOf(0) }
     var outcome by remember { mutableStateOf<SpotifyImport.Outcome?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var archiveSummary by remember { mutableStateOf<String?>(null) }
+    val archivePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            running = true
+            failed = false
+            scope.launch(Dispatchers.IO) {
+                val collections = SpotifyLibraryArchive.read(context, uri).getOrElse {
+                    failed = true
+                    running = false
+                    return@launch
+                }
+                if (collections.isEmpty()) {
+                    failed = true
+                    running = false
+                    return@launch
+                }
+                val imported = mutableListOf<SpotifyImport.Outcome>()
+                var completed = 0
+                val allTracks = collections.sumOf { it.tracks.size }
+                total = allTracks
+                done = 0
+                for (collection in collections) {
+                    val result = SpotifyImport.importTracks(collection.name, collection.tracks, database) { progress ->
+                        done = completed + progress.done
+                        total = allTracks
+                    }.getOrElse {
+                        failed = true
+                        running = false
+                        return@launch
+                    }
+                    imported += result
+                    completed += collection.tracks.size
+                }
+                archiveSummary = "${imported.size} colecciones importadas · ${imported.sumOf { it.matched }} de ${imported.sumOf { it.total }} canciones encontradas"
+                outcome = imported.firstOrNull()
+                running = false
+            }
+        }
+    }
 
     val result = outcome
     val looksRight = SpotifyPlaylist.parseLink(link.text) != null
@@ -153,7 +198,7 @@ fun SpotifyImportDialog(
             when {
                 result != null -> {
                     Text(
-                        text = stringResource(R.string.import_spotify_done, result.matched, result.total),
+                        text = archiveSummary ?: stringResource(R.string.import_spotify_done, result.matched, result.total),
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                     )
@@ -190,6 +235,14 @@ fun SpotifyImportDialog(
                 }
 
                 else -> {
+                    TextButton(
+                        enabled = !running,
+                        onClick = { archivePicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Importar biblioteca completa desde ZIP de Spotify")
+                    }
+                    Note("Selecciona el ZIP de datos de cuenta que descargaste de Spotify. La importación es local y puntual; no conecta ni sincroniza tu cuenta.")
                     TextField(
                         value = link,
                         onValueChange = {
